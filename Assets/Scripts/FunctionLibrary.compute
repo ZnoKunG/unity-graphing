@@ -1,0 +1,187 @@
+// Each #kernel tells which function to compile; you can have many kernels
+RWStructuredBuffer<float3> _Positions;
+uint _Resolution;
+float _Step;
+float _Time;
+float _TransitionProgress;
+#define PI 3.14159265358979323846
+
+#pragma kernel WaveKernel
+#pragma kernel WaveToMultiWaveKernel
+
+#pragma kernel MultiWaveKernel
+#pragma kernel MultiWaveToRippleKernel
+
+#pragma kernel RippleKernel
+#pragma kernel RippleToWave3DKernel
+
+#pragma kernel Wave3DKernel
+#pragma kernel Wave3DToMultiWave3DKernel
+
+#pragma kernel MultiWave3DKernel
+#pragma kernel MultiWave3DToRipple3DKernel
+
+#pragma kernel Ripple3DKernel
+#pragma kernel Ripple3DToSphereKernel
+
+#pragma kernel SphereKernel
+#pragma kernel SphereToTurboKernel
+
+#pragma kernel TurboKernel
+#pragma kernel TurboToTorusKernel
+
+#pragma kernel TorusKernel
+#pragma kernel TorusToWaveKernel
+
+float2 GetUV(uint3 id)
+{
+    return (id.xy + 0.5) * _Step - 1.0;
+}
+
+void SetPosition(uint3 id, float3 position)
+{
+    if (id.x < _Resolution && id.y < _Resolution)
+    {
+        _Positions[id.x + id.y * _Resolution] = position;
+    }
+}
+
+float3 Wave(float u, float v, float t)
+{
+    float3 p;
+    p.x = u;
+    p.y = sin(PI * (u + t));
+    p.z = v;
+    return p;
+}
+
+//float3 FuncInterp(float u, float v, float t, Function from, Function to, float progress)
+//{
+    //return lerp(from(u, v, t), to(u, v, t), smoothStep(0, 1, progress));
+//}
+
+float3 MultiWave(float u, float v, float t)
+{
+    float3 p;
+    p.x = u;
+    p.z = v;
+    p.y = sin(PI * (u + 0.5 * t));
+    p.y += 0.5 * sin(2 * PI * (u + t));
+    return p;
+}
+
+float3 Ripple(float u, float v, float t)
+{
+    float3 p;
+    p.x = u;
+    p.z = v;
+    float d = abs(u);
+    p.y = sin(PI * (4 * d - t));
+    p.y = p.y / (1 + 10 * d);
+    return p;
+}
+
+float3 Wave3D(float u, float v, float t)
+{
+    float3 p;
+    p.x = u;
+    p.z = v;
+    p.y = sin(PI * (u + v + t));
+    return p;
+}
+
+float3 MultiWave3D(float u, float v, float t)
+{
+    float3 p;
+    p.x = u;
+    p.z = v;
+    p.y = sin(PI * (u + 0.5 * t));
+    p.y += 0.5 * sin(2 * PI * (v + t));
+    p.y += sin(PI * (u + v + 0.25 * t));
+    p.y = p.y * (2.0 / 3.0
+    );
+    return p;
+}
+
+float3 Ripple3D(float u, float v, float t)
+{
+    float3 p;
+    p.x = u;
+    p.z = v;
+    float d = sqrt(u * u + v * v);
+    p.y = sin(PI * (4 * d - t));
+    p.y = p.y / (1 + 10 * d);
+    return p;
+}
+
+float3 Sphere(float u, float v, float t)
+{
+    float3 p;
+    float r = 1;
+    float s = r * cos(0.5 * PI * v);
+    p.x = s * sin(PI * (u + 0.1 * t));
+    p.z = s * cos(PI * (u + 0.1 * t));
+    p.y = r * sin(0.5 * PI * v);
+    return p;
+}
+
+float3 Turbo(float u, float v, float t)
+{
+    float3 p;
+    float r = 0.8 + 0.2 * sin(PI * (6 * u + 4 * v + t));
+    float s = r * cos(0.5 * PI * v);
+    p.x = s * sin(PI * u);
+    p.z = s * cos(PI * u);
+    p.y = r * sin(0.5 * PI * v);
+    return p;
+}
+
+float3 Torus(float u, float v, float t)
+{
+    float r1 = 0.65 + 0.1 * sin(PI * (5 * u + t / 3));
+    float r2 = 0.20 + 0.05 * sin(PI * (2 * u + 8 * v + 3 * t));
+    float s = r1 + r2 * cos(PI * v);
+    float3 p;
+    p.x = s * sin(PI * u);
+    p.y = r2 * sin(PI * v);
+    p.z = s * cos(PI * u);
+    return p;
+}
+
+#define KERNEL_FUNCTION(function) \
+    [numthreads(8,8,1)] \
+    void function##Kernel(uint3 id : SV_DispatchThreadID) { \
+        float2 uv = GetUV(id); \
+        SetPosition(id, function(uv.x, uv.y, _Time)); \
+    }
+
+#define KERNEL_INTERP_FUNCTION(fromFunc, toFunc) \
+    [numthreads(8,8,1)] \
+    void fromFunc##To##toFunc##Kernel(uint3 id : SV_DispatchThreadID) { \
+        float2 uv = GetUV(id); \
+        float3 pos = lerp( \
+            fromFunc(uv.x, uv.y, _Time), toFunc(uv.x, uv.y, _Time), \
+            _TransitionProgress \
+        ); \
+        SetPosition(id, pos); \
+    }
+
+KERNEL_FUNCTION(Wave)
+KERNEL_FUNCTION(MultiWave)
+KERNEL_FUNCTION(Ripple)
+KERNEL_FUNCTION(Wave3D)
+KERNEL_FUNCTION(MultiWave3D)
+KERNEL_FUNCTION(Ripple3D)
+KERNEL_FUNCTION(Sphere)
+KERNEL_FUNCTION(Turbo)
+KERNEL_FUNCTION(Torus)
+
+KERNEL_INTERP_FUNCTION(Wave, MultiWave)
+KERNEL_INTERP_FUNCTION(MultiWave, Ripple)
+KERNEL_INTERP_FUNCTION(Ripple, Wave3D)
+KERNEL_INTERP_FUNCTION(Wave3D, MultiWave3D)
+KERNEL_INTERP_FUNCTION(MultiWave3D, Ripple3D)
+KERNEL_INTERP_FUNCTION(Ripple3D, Sphere)
+KERNEL_INTERP_FUNCTION(Sphere, Turbo)
+KERNEL_INTERP_FUNCTION(Turbo, Torus)
+KERNEL_INTERP_FUNCTION(Torus, Wave)
